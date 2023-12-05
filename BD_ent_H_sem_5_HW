@@ -1,0 +1,349 @@
+BigData. Введение в экосистему Hadoop
+
+Урок 5. Форматы хранения
+
+
+Данные в таблице:
+create external table hive_db.citation_data
+(
+oci string,
+citing string,
+cited string,
+creation string,
+timespan string,
+journal_sc string,
+author_sc string
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+location '/test_datasets/citation'
+
+Её размер:
+hdfs dfs -du -h -s /test_datasets/citation 
+
+Задание:
+1. Создать таблицы в форматах PARQUET/ORC/AVRO c компрессией и без оной. (Выберите один вариант, например ORC с компрессией)
+2. Заполнить данными из большой таблицы hive_db.citation_data
+3. Посмотреть на получившийся размер данных
+4. Посчитать count некоторых колонок в разных форматах хранения.
+5. Посчитать агрегаты по одной и нескольким колонкам в разных форматах.
+6. Сделать выводы о эффективности хранения и компресии.
+
+Нужно повторить экперимент, проведенный на лекции:
+1. Развернуть кластер через Docker (или выполнить ДЗ на учебном клстере, удалив филы потом)
+2. Загрузить в наш развернутый hdfs самый большой фил из датасета и сделать external table (образец с лекции тут )
+3. Далаее создать таблицы с разными форматами как в local_hive.sql и попробовать пописать различные запросы, засечь и сравнить время.
+4. Повторить эксперимент с паркетом и orc добавив 2 различных сжатия (GZIP/SNAPPY) и сравнить получившийся размер филов с изначалаьным, 
+   а так же время выполнения запросов.
+
+Из uber-raw-data-janjune-15.csv делаю EXTERNAL TABLE и на её основе последовательно формирую таблицы форматов: csv, sequencefile, parquet-snappy, parquet-gzip, orc-snappy, orc-gzip, avro. В конце скрипта вывожу сводную таблицу с весом таблицы каждого формата и скоростью выполнения некоторых COUNT(..)-запросов по этим таблицам.
+
+USE student42_18;
+
+1. Развернуть кластер через Docker (или выполнить ДЗ на учебном клстере, удалив филы потом)
+   РЕШЕНИЕ: развернула, только в нём и работаю
+
+2. Загрузить в наш развернутый hdfs самый большой фил из датасета и сделать external table (образец с лекции тут )
+   РЕШЕНИЕ: вот он 
+/*
+root@e07f4c457369:/opt# hdfs dfs -du -h /root/uberdata
+526.1 M  /root/uberdata/uber-raw-data-janjune-15.csv
+ */
+
+3. Далаее создать таблицы с разными форматами как в local_hive.sql и попробовать пописать различные запросы, засечь и сравнить время.
+4. Повторить эксперимент с паркетом и orc добавив 2 различных сжатия (GZIP/SNAPPY) 
+   и сравнить получившийся размер филов с изначалаьным, а так же время выполнения запросов.
+   РЕШЕНИЕ: 
+
+1) EXTERNAL TABLE
+DROP TABLE IF EXISTS uber_data_ex;
+CREATE EXTERNAL TABLE uber_data_ex(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT
+)ROW FORMAT DELIMITED 
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/root/uberdata'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+SELECT COUNT(1) FROM uber_data_ex; -- время 5 512
+SELECT COUNT(locationID) FROM uber_data_ex; -- время 7 526
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex; -- время 7 511
+
+2) CSV
+DROP TABLE IF EXISTS uber_data_ex_csv;
+CREATE TABLE uber_data_ex_csv(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS TEXTFILE
+LOCATION '/root/uberdata_csv';
+INSERT OVERWRITE TABLE uber_data_ex_csv 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_csv; -- время 216
+SELECT COUNT(locationID) FROM uber_data_ex_csv; -- время 8 708
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_csv; -- время 8 660
+
+3) SEQUENCEFILE
+DROP TABLE IF EXISTS uber_data_ex_sq;
+CREATE TABLE uber_data_ex_sq(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS SEQUENCEFILE
+LOCATION '/root/uberdata_sq';
+INSERT OVERWRITE TABLE uber_data_ex_sq 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_sq; -- время 232
+SELECT COUNT(locationID) FROM uber_data_ex_sq; -- время 30 632
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_sq; -- время 31 747
+
+4) PARQUET
+DROP TABLE IF EXISTS uber_data_ex_pq;
+CREATE TABLE uber_data_ex_pq(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS PARQUET
+LOCATION '/root/uberdata_pq';
+INSERT OVERWRITE TABLE uber_data_ex_pq 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_pq; -- время 191
+SELECT COUNT(locationID) FROM uber_data_ex_pq; -- время 6 478
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_pq; -- время 5 452
+
+5) PARQUET-SNAPPY
+
+SET parquet.compression=SNAPPY;
+DROP TABLE IF EXISTS uber_data_ex_pq_SNAPPY;
+CREATE TABLE uber_data_ex_pq_SNAPPY(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS PARQUET
+LOCATION '/root/uberdata_pq_SNAPPY';
+INSERT OVERWRITE TABLE uber_data_ex_pq_SNAPPY 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_pq_SNAPPY; -- время 209
+SELECT COUNT(locationID) FROM uber_data_ex_pq_SNAPPY; -- время 6 787
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_pq_SNAPPY; -- время 5 483
+
+6) PARQUET-GZIP
+
+SET parquet.compression=FALSE;
+DROP TABLE IF EXISTS uber_data_ex_pq_GZIP;
+CREATE TABLE uber_data_ex_pq_GZIP(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS PARQUET
+LOCATION '/root/uberdata_pq_GZIP';
+INSERT OVERWRITE TABLE uber_data_ex_pq_GZIP 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_pq_GZIP; -- время 166
+SELECT COUNT(locationID) FROM uber_data_ex_pq_GZIP; -- время 6 519
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_pq_GZIP; -- время 6 266
+
+7) ORC
+DROP TABLE IF EXISTS uber_data_ex_orc;
+CREATE TABLE uber_data_ex_orc(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS ORC
+LOCATION '/root/uberdata_orc';
+INSERT OVERWRITE TABLE uber_data_ex_orc 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_orc; -- время 238
+SELECT COUNT(locationID) FROM uber_data_ex_orc; -- время 6 635
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_orc; -- время 7 433
+
+8) ORC-SNAPPY
+
+SET orc.compression=SNAPPY;
+DROP TABLE IF EXISTS uber_data_ex_orc_SNAPPY;
+CREATE TABLE uber_data_ex_orc_SNAPPY(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS ORC
+LOCATION '/root/uberdata_orc_SNAPPY';
+INSERT OVERWRITE TABLE uber_data_ex_orc_SNAPPY 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_orc_SNAPPY; -- время 233
+SELECT COUNT(locationID) FROM uber_data_ex_orc_SNAPPY; -- время 7 774
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_orc_SNAPPY; -- время 6 851
+
+9) ORC-GZIP
+
+SET orc.compression=GZIP;
+DROP TABLE IF EXISTS uber_data_ex_orc_GZIP;
+CREATE TABLE uber_data_ex_orc_GZIP(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS ORC
+LOCATION '/root/uberdata_orc_GZIP';
+INSERT OVERWRITE TABLE uber_data_ex_orc_GZIP 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_orc_GZIP; -- время 174
+SELECT COUNT(locationID) FROM uber_data_ex_orc_GZIP; -- время 6 392
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_orc_GZIP; -- время 7 420
+
+10) AVRO
+DROP TABLE IF EXISTS uber_data_ex_avro;
+CREATE TABLE uber_data_ex_avro(
+	Dispatching_base_num STRING,
+	Pickup_date TIMESTAMP,
+	Affiliated_base_num STRING,
+	locationID INT)
+STORED AS AVRO
+LOCATION '/root/uberdata_avro';
+INSERT OVERWRITE TABLE uber_data_ex_avro 
+SELECT * FROM uber_data_ex;
+
+SELECT COUNT(1) FROM uber_data_ex_avro; -- время 109
+SELECT COUNT(locationID) FROM uber_data_ex_avro; -- время 36 448
+SELECT COUNT(DISTINCT dispatching_base_num) FROM uber_data_ex_avro; -- время 39 440
+
+
+Вес таблиц:
+/*
+root@e07f4c457369:/opt# hdfs dfs -du -h -s /root/uberdata*
+526.1 M  /root/uberdata
+351.2 M  /root/uberdata_avro
+512.5 M  /root/uberdata_csv
+36.5 M  /root/uberdata_orc
+36.5 M  /root/uberdata_orc_GZIP
+36.5 M  /root/uberdata_orc_SNAPPY
+50.6 M  /root/uberdata_pq
+50.6 M  /root/uberdata_pq_GZIP
+66.7 M  /root/uberdata_pq_SNAPPY
+682.5 M  /root/uberdata_sq
+ */
+
+
+Сводные данные результатов:
+DROP TABLE IF EXISTS uber_res;
+CREATE TABLE uber_res(
+	name VARCHAR(20),
+	`count_*` DOUBLE,
+	count_licationID DOUBLE,
+	count_dostinct DOUBLE,
+	file_weight DOUBLE);
+
+INSERT INTO TABLE uber_res VALUES
+	('EXTERNAL TABLE', 5.512, 7.526, 7.511, 526.1),
+	('CSV', 0.216, 8.708, 8.660, 512.5),
+	('SEQUENCEFILE', 0.232, 30.632, 31.747, 682.5),
+	('PARQUET', 0.191, 6.478, 5.452, 50.6),
+	('PARQUET-SNAPPY', 0.209, 6.787, 5.483, 66.7),
+	('PARQUET-GZIP', 0.166, 6.519, 6.266, 50.6), 
+	('ORC', 0.238, 6.635, 7.433, 36.5),
+	('ORC-SNAPPY', 0.233, 7.774, 6.851, 36.5),
+	('ORC-GZIP', 0.174, 6.392, 7.420, 36.5),
+	('AVRO', 0.109, 36.448, 39.44, 351.2)
+
+/*
+SELECT * FROM uber_res;
++-----------------+-------------------+----------------------------+--------------------------+-----------------------+
+|  uber_res.name  | uber_res.count_*  | uber_res.count_licationid  | uber_res.count_dostinct  | uber_res.file_weight  |
++-----------------+-------------------+----------------------------+--------------------------+-----------------------+
+| EXTERNAL TABLE  | 5.512             | 7.526                      | 7.511                    | 526.1                 |
+| CSV             | 0.216             | 8.708                      | 8.66                     | 512.5                 |
+| SEQUENCEFILE    | 0.232             | 30.632                     | 31.747                   | 682.5                 |
+| PARQUET         | 0.191             | 6.478                      | 5.452                    | 50.6                  |
+| PARQUET-SNAPPY  | 0.209             | 6.787                      | 5.483                    | 66.7                  |
+| PARQUET-GZIP    | 0.166             | 6.519                      | 6.266                    | 50.6                  |
+| ORC             | 0.238             | 6.635                      | 7.433                    | 36.5                  |
+| ORC-SNAPPY      | 0.233             | 7.774                      | 6.851                    | 36.5                  |
+| ORC-GZIP        | 0.174             | 6.392                      | 7.42                     | 36.5                  |
+| AVRO            | 0.109             | 36.448                     | 39.44                    | 351.2                 |
++-----------------+-------------------+----------------------------+--------------------------+-----------------------+
+*/
+
+
+
+Скачала с Kaggle датасет с рейтингом исполнителей на Spotify за 2020-2021 гг. Выбрала из него по региону Россию и оставила в филе скрипт, что выводит топ-артистов по стримам в 2020-м и 2021-м. Плюс скрипт вывода в одну строку джойном двух TEMPORARY TABLE топ-1-артистов за два года чарта MOVE UP.
+
+USE student42_18;
+
+-- рейтинг Spotify за 2020-2021 гг., датасет отсюда: https://www.kaggle.com/datasets/dhruvildave/spotify-charts
+DROP TABLE IF EXISTS spotify_charts;
+CREATE TEMPORARY EXTERNAL TABLE spotify_charts(
+	title STRING, `rank` INT, `date` DATE, artist STRING,
+	url STRING, region STRING, chart STRING, trend STRING, streams INT
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/root/spotify'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+-- русские артисты
+DROP TABLE IF EXISTS spotify_charts_russia;
+CREATE TABLE spotify_charts_russia(
+	title STRING, `rank` INT, `date` DATE, artist STRING,
+	url STRING, region STRING, chart STRING, trend STRING, streams INT
+) STORED AS ORC LOCATION '/root/spotify';
+INSERT OVERWRITE TABLE spotify_charts_russia 
+SELECT * FROM spotify_charts WHERE region='Russia';
+
+-- вот они
+SELECT * FROM spotify_charts_russia;
+
+-- топы по стримам в 2020-м году MORGENSHTERN, BTS, SLAVA MARLOW
+SELECT
+	artist,	title, `rank`, streams,	trend, `date`
+FROM spotify_charts_russia
+WHERE YEAR(`date`) = 2020
+ORDER BY streams DESC;
+
+-- а в 2021-м году INSTASAMKA прям вырвалась вперёд
+SELECT
+	artist,	title, `rank`, streams,	trend, `date`
+FROM spotify_charts_russia
+WHERE YEAR(`date`) = 2021
+ORDER BY streams DESC;
+
+--ну и вот пример JOIN - соединяем 2 таблицы, топ-артист оттуда, топ-артист отсюда
+DROP TABLE IF EXISTS top_2020;
+CREATE TEMPORARY TABLE IF NOT EXISTS top_2020 AS
+SELECT
+	artist,	title, `rank`, streams, trend, `date`
+FROM spotify_charts_russia 
+WHERE YEAR(`date`) = 2020
+ORDER BY streams DESC;
+
+DROP TABLE IF EXISTS top_2021;
+CREATE TEMPORARY TABLE IF NOT EXISTS top_2021 AS
+SELECT
+	artist,	title, `rank`, streams, trend, `date`
+FROM spotify_charts_russia 
+WHERE YEAR(`date`) = 2021
+ORDER BY streams DESC;
+
+
+SELECT 
+	top_2020.`date`, top_2020.artist, top_2020.title, top_2020.streams,
+	top_2021.`date`, top_2021.artist, top_2021.title, top_2021.streams
+FROM top_2020
+JOIN top_2021 ON top_2020.trend = top_2021.trend
+WHERE YEAR(top_2020.`date`) = 2020 AND YEAR(top_2021.`date`) = 2021
+LIMIT 1;
+
