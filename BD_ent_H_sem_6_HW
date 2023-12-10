@@ -1,0 +1,136 @@
+BigData. Введение в экосистему Hadoop
+
+Урок 6. ETL
+
+
+1. Создать отдельную БД в HIve
+2. Посмотреть при помощи SQOOP содержимое БД в POsgresql (список таблиц)
+3. Импортировать в нее три любые таблицы из базы pg_db в Postgresql используя SQOOP. Для каждой таблице используйте отдельный формат хранения -- ORC/Parquet/AVRO Рекомендую захватить таблицу sales_large -- там порядка 10 миллионов записей, она будет достаточно репрезентативна для проверки компрессии.
+4. Найдите папки на файловой системе куда были сохранены данные. Посмотрите их размер.
+5. Сделайте несколько произвольных запросов к этим таблицам.
+
+
+Доступ к Postgres внутри кластера
+Хост 89.208.222.201
+Порт 5432
+БД pg_db
+Пользователь exporter
+Пароль exporter_pass
+
+Flume:
+Придумать свой скрипт, который генерит выходные данные
+Запустить свой flume, прочитать свои данные в hive 
+
+https://sqoop.apache.org/docs/1.4.6/SqoopUserGuide.html
+https://flume.apache.org/FlumeUserGuide.html
+https://docs.cloudera.com/documentation/enterprise/5-14-x/topics/cdh_ig_flume_supported_sources_sinks_channels.html
+
+
+Развернуть Airflow из репозитория: https://github.com/puckel/docker-airflow (командой docker-compose -f docker-compose-LocalExecutor.yml up -d)
+Опираясь на пример my_first_dag.py. Написать даг, котрый будет делать следующее:
+task_1 будет BranchPythonOperator, который будет читать Variable hw_etl, которое должно равняться 1, 2 или любое другое число; и в зависимости от этого даг должен запускать таски по-разному:
+1.	Когда hw_etl=1 картинка hw_6_var_1.png
+2.	Когда hw_etl=2 картинка hw_6_var_2.png
+3.	Когда hw_etl not in (1,2) картинка hw_6_var_not_12.png
+Картинки приложил.
+Ваш даг должен выглядеть так же, как на картинках в материалах.
+Пришлите код + скрины 3х описанных выше кейсов (pdf/png/jpg)
+
+
+"""
+Code that goes along with the Airflow located at:
+http://airflow.readthedocs.org/en/latest/tutorial.html
+"""
+from airflow import DAG
+# from airflow.operators.bash_operator import BashOperator
+from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
+from datetime import datetime, timedelta
+from airflow.models import Variable
+
+default_args = {
+    "owner": "airflow",
+    "depends_on_past": False,
+    "start_date": datetime(2015, 6, 1),
+    "email": ["airflow@airflow.com"],
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 0,
+    "retry_delay": timedelta(seconds=2),
+    "trigger_rule": "none_failed",
+    # 'queue': 'bash_queue',
+    # 'pool': 'backfill',
+    # 'priority_weight': 10,
+    # 'end_date': datetime(2016, 1, 1),
+}
+
+dag = DAG(
+    dag_id="dz_6",
+    default_args=default_args,
+    # schedule_interval=timedelta(1),
+    schedule_interval=None,
+    catchup=False,)
+
+
+def func_1(to_print, **kwargs):
+    print(to_print)
+
+
+def branch_operator(**kwargs):
+    import random
+    i = int(random.choice(list(eval(Variable.get('hw_etl')))))
+    print(f'**********{i}**********')
+    if i == 1:
+        return ['task_2']
+    elif i == 2:
+        return ['task_3']
+    else:
+        return []
+
+
+task_1 = BranchPythonOperator(
+    task_id='task_1',
+    python_callable=branch_operator,
+    dag=dag,)
+
+task_2 = PythonOperator(
+    task_id='task_2',
+    python_callable=func_1,
+    op_kwargs={'to_print': 'TWO'},
+    dag=dag,)
+
+task_3 = PythonOperator(
+    task_id='task_3',
+    python_callable=func_1,
+    op_kwargs={'to_print': 'THREE'},
+    dag=dag,)
+
+task_4 = PythonOperator(
+    task_id='task_4',
+    python_callable=func_1,
+    op_kwargs={'to_print': 'FOUR'},
+    dag=dag,)
+
+task_5 = PythonOperator(
+    task_id='task_5',
+    python_callable=func_1,
+    op_kwargs={'to_print': 'FIVE'},
+    dag=dag,)
+
+task_6 = PythonOperator(
+    task_id='task_6',
+    python_callable=func_1,
+    op_kwargs={'to_print': 'SIX'},
+    trigger_rule='all_done',
+    dag=dag,)
+
+task_1 >> [task_2, task_3, task_4]
+task_3 >> task_5
+task_4 >> task_5
+task_2 >> task_6
+task_5 >> task_6
+
+
+
+
+ 
+
